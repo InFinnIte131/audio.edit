@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Audio.edit</title>
+
+<style>
+*{box-sizing:border-box}
+
+body{
+  margin:0;
+  font-family:Segoe UI, Arial, sans-serif;
+  background:#eefefe;
+  height:100vh;
+  overflow:hidden;
+}
+
+.app{
+  display:flex;
+  height:100vh;
+}
+
+.sidebar{
+  width:300px;
+  background:#67d6d6;
+  padding:18px;
+  overflow:auto;
+}
+
+.logo{
+  font-size:26px;
+  font-weight:800;
+  color:#003f3f;
+  margin-bottom:15px;
+}
+
+.main{
+  flex:1;
+  padding:25px;
+}
+
+.card{
+  background:white;
+  border-radius:16px;
+  padding:20px;
+  box-shadow:0 6px 18px rgba(0,0,0,.08);
+}
+
+.control{
+  margin:15px 0;
+}
+
+label{
+  display:block;
+  font-weight:600;
+  margin-bottom:5px;
+  color:#004f4f;
+}
+
+input[type=range]{
+  width:100%;
+}
+
+button{
+  width:100%;
+  margin-top:10px;
+  padding:11px;
+  border:none;
+  border-radius:10px;
+  background:#008c8c;
+  color:white;
+  cursor:pointer;
+}
+
+button:hover{opacity:.9}
+
+audio{width:100%; margin-top:10px}
+
+.value{
+  font-size:12px;
+  color:#004f4f;
+}
+</style>
+</head>
+
+<body>
+
+<div class="app">
+
+<div class="sidebar">
+  <div class="logo">♪ Audio.edit</div>
+
+  <input type="file" id="fileInput" accept="audio/*">
+
+  <div class="control">
+    <label>Speed</label>
+    <input type="range" id="speed" min="0.5" max="2" step="0.01" value="1">
+    <div class="value" id="speedVal">1.00x</div>
+  </div>
+
+  <div class="control">
+    <label>Pitch</label>
+    <input type="range" id="pitch" min="0.5" max="2" step="0.01" value="1">
+    <div class="value" id="pitchVal">1.00x</div>
+  </div>
+
+  <div class="control">
+    <label>Bass</label>
+    <input type="range" id="bass" min="-20" max="20" value="0">
+    <div class="value" id="bassVal">0 dB</div>
+  </div>
+
+  <div class="control">
+    <label>Reverb</label>
+    <input type="range" id="reverb" min="0" max="100" value="0">
+    <div class="value" id="reverbVal">0%</div>
+  </div>
+
+  <button id="nightcore">Nightcore</button>
+  <button id="slowed">Slowed + Reverb</button>
+  <button id="reset">Reset</button>
+</div>
+
+<div class="main">
+  <div class="card">
+    <h2>Playback</h2>
+
+    <audio id="audio" controls></audio>
+    <button id="play">Play</button>
+  </div>
+</div>
+
+</div>
+
+<script>
+const audio = document.getElementById("audio");
+let ctx, source;
+
+let bassFilter, convolver, dryGain, wetGain;
+
+function initAudio(){
+  if(ctx) return;
+
+  ctx = new (window.AudioContext || window.webkitAudioContext)();
+
+  source = ctx.createMediaElementSource(audio);
+
+  bassFilter = ctx.createBiquadFilter();
+  bassFilter.type = "lowshelf";
+  bassFilter.frequency.value = 180;
+
+  dryGain = ctx.createGain();
+  wetGain = ctx.createGain();
+
+  convolver = ctx.createConvolver();
+  convolver.buffer = makeImpulse(2.5, 2.5);
+
+  source.connect(bassFilter);
+
+  bassFilter.connect(dryGain);
+  bassFilter.connect(convolver);
+
+  convolver.connect(wetGain);
+
+  dryGain.connect(ctx.destination);
+  wetGain.connect(ctx.destination);
+}
+
+function makeImpulse(duration, decay){
+  const rate = ctx.sampleRate;
+  const len = rate * duration;
+  const buffer = ctx.createBuffer(2, len, rate);
+
+  for(let c=0;c<2;c++){
+    const data = buffer.getChannelData(c);
+    for(let i=0;i<len;i++){
+      data[i] = (Math.random()*2-1) * Math.pow(1 - i/len, decay);
+    }
+  }
+  return buffer;
+}
+
+document.getElementById("fileInput").onchange = e=>{
+  const f = e.target.files[0];
+  if(f){
+    audio.src = URL.createObjectURL(f);
+    initAudio();
+  }
+};
+
+const speed = document.getElementById("speed");
+const pitch = document.getElementById("pitch");
+
+function updateRate(){
+  audio.playbackRate = speed.value * pitch.value;
+  audio.preservesPitch = false;
+
+  document.getElementById("speedVal").textContent = (+speed.value).toFixed(2)+"x";
+  document.getElementById("pitchVal").textContent = (+pitch.value).toFixed(2)+"x";
+}
+
+speed.oninput = updateRate;
+pitch.oninput = updateRate;
+
+document.getElementById("bass").oninput = e=>{
+  initAudio();
+  bassFilter.gain.value = e.target.value;
+  document.getElementById("bassVal").textContent = e.target.value+" dB";
+};
+
+document.getElementById("reverb").oninput = e=>{
+  initAudio();
+  const v = e.target.value/100;
+  wetGain.gain.value = v;
+  dryGain.gain.value = 1 - v;
+  document.getElementById("reverbVal").textContent = e.target.value+"%";
+};
+
+document.getElementById("play").onclick = async ()=>{
+  initAudio();
+  await ctx.resume();
+  audio.play();
+};
+
+document.getElementById("nightcore").onclick = ()=>{
+  speed.value = 1.15;
+  pitch.value = 1.15;
+  speed.oninput(); pitch.oninput();
+};
+
+document.getElementById("slowed").onclick = ()=>{
+  speed.value = 0.85;
+  pitch.value = 0.85;
+  reverb.value = 30;
+  speed.oninput(); pitch.oninput();
+  document.getElementById("reverb").dispatchEvent(new Event("input"));
+};
+
+document.getElementById("reset").onclick = ()=>{
+  speed.value = 1;
+  pitch.value = 1;
+  bass.value = 0;
+  reverb.value = 0;
+
+  speed.oninput();
+  pitch.oninput();
+  document.getElementById("bass").oninput({target:{value:0}});
+  document.getElementById("reverb").oninput({target:{value:0}});
+};
+</script>
+
+</body>
+</html>
