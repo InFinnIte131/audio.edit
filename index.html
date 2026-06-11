@@ -11,61 +11,36 @@
 body{
   margin:0;
   font-family:Segoe UI, Arial, sans-serif;
-  background:#eefefe;
+  background:#eafefe;
   height:100vh;
   overflow:hidden;
 }
 
-.app{
-  display:flex;
-  height:100vh;
-}
+.app{display:flex;height:100vh}
 
 .sidebar{
-  width:300px;
+  width:340px;
   background:#67d6d6;
   padding:18px;
+  display:flex;
+  flex-direction:column;
+  gap:10px;
   overflow:auto;
 }
 
-.logo{
-  font-size:26px;
-  font-weight:800;
-  color:#003f3f;
-  margin-bottom:15px;
-}
+.logo{font-size:26px;font-weight:800;color:#003f3f}
+.version{font-size:12px;color:#004f4f}
 
-.main{
-  flex:1;
-  padding:25px;
-}
-
-.card{
-  background:white;
-  border-radius:16px;
-  padding:20px;
-  box-shadow:0 6px 18px rgba(0,0,0,.08);
-}
-
-.control{
-  margin:15px 0;
-}
-
-label{
-  display:block;
-  font-weight:600;
-  margin-bottom:5px;
-  color:#004f4f;
-}
-
-input[type=range]{
-  width:100%;
+.section{
+  background:rgba(255,255,255,0.25);
+  padding:12px;
+  border-radius:12px;
 }
 
 button{
   width:100%;
-  margin-top:10px;
-  padding:11px;
+  margin-top:8px;
+  padding:10px;
   border:none;
   border-radius:10px;
   background:#008c8c;
@@ -75,11 +50,22 @@ button{
 
 button:hover{opacity:.9}
 
-audio{width:100%; margin-top:10px}
+input[type=range]{width:100%}
+label{font-size:13px;font-weight:600;color:#004f4f}
+.value{font-size:12px;color:#003f3f}
 
-.value{
-  font-size:12px;
-  color:#004f4f;
+.main{
+  flex:1;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+}
+
+canvas{
+  width:92%;
+  height:320px;
+  background:#001818;
+  border-radius:14px;
 }
 </style>
 </head>
@@ -89,165 +75,227 @@ audio{width:100%; margin-top:10px}
 <div class="app">
 
 <div class="sidebar">
+
   <div class="logo">♪ Audio.edit</div>
+  <div class="version">v2.3.3</div>
 
-  <input type="file" id="fileInput" accept="audio/*">
+  <div class="section">
+    <input type="file" id="fileInput" accept="audio/*">
+    <button id="exportWav">This button does nothing</button>
+  </div>
 
-  <div class="control">
+  <div class="section">
     <label>Speed</label>
-    <input type="range" id="speed" min="0.5" max="2" step="0.01" value="1">
     <div class="value" id="speedVal">1.00x</div>
-  </div>
+    <input type="range" id="speed" min="0.5" max="2" step="0.01" value="1">
 
-  <div class="control">
-    <label>Pitch</label>
-    <input type="range" id="pitch" min="0.5" max="2" step="0.01" value="1">
-    <div class="value" id="pitchVal">1.00x</div>
-  </div>
-
-  <div class="control">
-    <label>Bass</label>
-    <input type="range" id="bass" min="-20" max="20" value="0">
+    <label>Bass (dB)</label>
     <div class="value" id="bassVal">0 dB</div>
-  </div>
+    <input type="range" id="bass" min="-24" max="24" value="0">
 
-  <div class="control">
-    <label>Reverb</label>
-    <input type="range" id="reverb" min="0" max="100" value="0">
+    <label>Reverb (%)</label>
     <div class="value" id="reverbVal">0%</div>
+    <input type="range" id="reverb" min="0" max="100" value="0">
   </div>
 
-  <button id="nightcore">Nightcore</button>
-  <button id="slowed">Slowed + Reverb</button>
-  <button id="reset">Reset</button>
+  <div class="section">
+    <button id="nightcore">Nightcore</button>
+    <button id="slowed">Slowed + Reverb</button>
+    <button id="mall">Mall</button>
+  </div>
+
+  <div class="section">
+    <button id="play">▶ Play / Pause</button>
+  </div>
+
 </div>
 
 <div class="main">
-  <div class="card">
-    <h2>Playback</h2>
-
-    <audio id="audio" controls></audio>
-    <button id="play">Play</button>
-  </div>
+  <canvas id="scope"></canvas>
 </div>
 
 </div>
 
 <script>
-const audio = document.getElementById("audio");
-let ctx, source;
+window.addEventListener("DOMContentLoaded", () => {
 
-let bassFilter, convolver, dryGain, wetGain;
+let ctx;
+let buffer=null;
+let source=null;
+let playing=false;
 
-function initAudio(){
+let bassFilter, convolver, dryGain, wetGain, analyser;
+let dataArray;
+
+// ---------------- INIT ----------------
+function init(){
   if(ctx) return;
 
   ctx = new (window.AudioContext || window.webkitAudioContext)();
 
-  source = ctx.createMediaElementSource(audio);
+  analyser = ctx.createAnalyser();
+  analyser.fftSize = 2048;
 
+  setup();
+  draw();
+}
+
+function setup(){
   bassFilter = ctx.createBiquadFilter();
-  bassFilter.type = "lowshelf";
-  bassFilter.frequency.value = 180;
+  bassFilter.type="lowshelf";
+  bassFilter.frequency.value=180;
+
+  convolver = ctx.createConvolver();
+  convolver.buffer = impulse();
 
   dryGain = ctx.createGain();
   wetGain = ctx.createGain();
-
-  convolver = ctx.createConvolver();
-  convolver.buffer = makeImpulse(2.5, 2.5);
-
-  source.connect(bassFilter);
 
   bassFilter.connect(dryGain);
   bassFilter.connect(convolver);
 
   convolver.connect(wetGain);
 
-  dryGain.connect(ctx.destination);
-  wetGain.connect(ctx.destination);
+  dryGain.connect(analyser);
+  wetGain.connect(analyser);
+
+  analyser.connect(ctx.destination);
+
+  dataArray = new Uint8Array(analyser.frequencyBinCount);
 }
 
-function makeImpulse(duration, decay){
-  const rate = ctx.sampleRate;
-  const len = rate * duration;
-  const buffer = ctx.createBuffer(2, len, rate);
+// ---------------- IMPULSE ----------------
+function impulse(){
+  const len=ctx.sampleRate*2.5;
+  const b=ctx.createBuffer(2,len,ctx.sampleRate);
 
   for(let c=0;c<2;c++){
-    const data = buffer.getChannelData(c);
+    const d=b.getChannelData(c);
     for(let i=0;i<len;i++){
-      data[i] = (Math.random()*2-1) * Math.pow(1 - i/len, decay);
+      d[i]=(Math.random()*2-1)*Math.pow(1-i/len,2.5);
     }
   }
-  return buffer;
+  return b;
 }
 
-document.getElementById("fileInput").onchange = e=>{
-  const f = e.target.files[0];
-  if(f){
-    audio.src = URL.createObjectURL(f);
-    initAudio();
-  }
+// ---------------- ELEMENTS ----------------
+const fileInput=document.getElementById("fileInput");
+const playBtn=document.getElementById("play");
+const speed=document.getElementById("speed");
+const bass=document.getElementById("bass");
+const reverb=document.getElementById("reverb");
+
+// ---------------- LOAD ----------------
+fileInput.onchange = async e=>{
+  const f=e.target.files[0];
+  if(!f) return;
+
+  init();
+
+  const arr=await f.arrayBuffer();
+  buffer=await ctx.decodeAudioData(arr);
+
+  playing=false;
+  playBtn.textContent="▶ Play / Pause";
 };
 
-const speed = document.getElementById("speed");
-const pitch = document.getElementById("pitch");
+// ---------------- PLAY ----------------
+playBtn.onclick = async ()=>{
+  if(!buffer) return;
 
-function updateRate(){
-  audio.playbackRate = speed.value * pitch.value;
-  audio.preservesPitch = false;
-
-  document.getElementById("speedVal").textContent = (+speed.value).toFixed(2)+"x";
-  document.getElementById("pitchVal").textContent = (+pitch.value).toFixed(2)+"x";
-}
-
-speed.oninput = updateRate;
-pitch.oninput = updateRate;
-
-document.getElementById("bass").oninput = e=>{
-  initAudio();
-  bassFilter.gain.value = e.target.value;
-  document.getElementById("bassVal").textContent = e.target.value+" dB";
-};
-
-document.getElementById("reverb").oninput = e=>{
-  initAudio();
-  const v = e.target.value/100;
-  wetGain.gain.value = v;
-  dryGain.gain.value = 1 - v;
-  document.getElementById("reverbVal").textContent = e.target.value+"%";
-};
-
-document.getElementById("play").onclick = async ()=>{
-  initAudio();
+  init();
   await ctx.resume();
-  audio.play();
+
+  if(playing && source){
+    source.stop();
+    playing=false;
+    playBtn.textContent="▶ Play / Pause";
+    return;
+  }
+
+  source = ctx.createBufferSource();
+  source.buffer = buffer;
+
+  source.playbackRate.value = parseFloat(speed.value);
+
+  bassFilter.gain.value = parseFloat(bass.value);
+
+  const rev = parseFloat(reverb.value)/100;
+  dryGain.gain.value = 1-rev;
+  wetGain.gain.value = rev;
+
+  source.connect(bassFilter);
+  source.start();
+
+  playing=true;
+  playBtn.textContent="⏸ Pause";
+
+  source.onended=()=>{
+    playing=false;
+    playBtn.textContent="▶ Play / Pause";
+  };
 };
 
-document.getElementById("nightcore").onclick = ()=>{
-  speed.value = 1.15;
-  pitch.value = 1.15;
-  speed.oninput(); pitch.oninput();
+// ---------------- UI ----------------
+speed.oninput=e=>speedVal.textContent=(+e.target.value).toFixed(2)+"x";
+bass.oninput=e=>bassVal.textContent=e.target.value+" dB";
+reverb.oninput=e=>reverbVal.textContent=e.target.value+"%";
+
+// ---------------- PRESETS ----------------
+nightcore.onclick=()=>{
+  speed.value=1.25;
+  bass.value=6;
+  reverb.value=10;
+  speed.oninput();bass.oninput();reverb.oninput();
 };
 
-document.getElementById("slowed").onclick = ()=>{
-  speed.value = 0.85;
-  pitch.value = 0.85;
-  reverb.value = 30;
-  speed.oninput(); pitch.oninput();
-  document.getElementById("reverb").dispatchEvent(new Event("input"));
+slowed.onclick=()=>{
+  speed.value=0.85;
+  bass.value=2;
+  reverb.value=35;
+  speed.oninput();bass.oninput();reverb.oninput();
 };
 
-document.getElementById("reset").onclick = ()=>{
-  speed.value = 1;
-  pitch.value = 1;
-  bass.value = 0;
-  reverb.value = 0;
-
-  speed.oninput();
-  pitch.oninput();
-  document.getElementById("bass").oninput({target:{value:0}});
-  document.getElementById("reverb").oninput({target:{value:0}});
+mall.onclick=()=>{
+  speed.value=0.95;
+  bass.value=20;
+  reverb.value=90;
+  speed.oninput();bass.oninput();reverb.oninput();
 };
+
+// ---------------- VISUALIZER ----------------
+const canvas=document.getElementById("scope");
+const c=canvas.getContext("2d");
+
+function draw(){
+  requestAnimationFrame(draw);
+  if(!analyser) return;
+
+  analyser.getByteTimeDomainData(dataArray);
+
+  c.fillStyle="#001818";
+  c.fillRect(0,0,canvas.width,canvas.height);
+
+  c.strokeStyle="#00ffd5";
+  c.lineWidth=2;
+  c.beginPath();
+
+  let x=0;
+  let slice=canvas.width/dataArray.length;
+
+  for(let i=0;i<dataArray.length;i++){
+    let y=(dataArray[i]/128)*canvas.height/2;
+
+    if(i===0)c.moveTo(x,y);
+    else c.lineTo(x,y);
+
+    x+=slice;
+  }
+
+  c.stroke();
+}
+
+});
 </script>
 
 </body>
